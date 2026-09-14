@@ -10,6 +10,9 @@ import { deriveCredentials } from './crypto'
 const CONVEX_URL =
   (import.meta.env.VITE_CONVEX_URL as string | undefined) || 'https://usable-parrot-39.convex.cloud'
 
+/** Shown in the UI so a sync failure always reveals which backend was used. */
+export const SYNC_BACKEND_URL = CONVEX_URL
+
 export interface AccountSession {
   accountNumber: string
   salt: string
@@ -39,20 +42,25 @@ export async function createAccountOnCloud(
   const c = getClient()
   if (!c) return { ok: false, error: 'Cloud sync is not configured yet.' }
   const creds = await deriveCredentials(password)
-  const res = await c.mutation(api.sync.createAccount, {
-    accountNumber,
-    passwordHash: creds.passwordHash,
-    passwordSalt: creds.salt,
-    config: state.config,
-    logs: state.logs,
-  })
-  if (!res.ok) return { ok: false, error: res.error }
-  return {
-    ok: true,
-    config: null,
-    logs: null,
-    updatedAt: Date.now(),
-    session: { accountNumber: accountNumber.trim(), salt: creds.salt, passwordHash: creds.passwordHash },
+  try {
+    const res = await c.mutation(api.sync.createAccount, {
+      accountNumber,
+      passwordHash: creds.passwordHash,
+      passwordSalt: creds.salt,
+      config: state.config,
+      logs: state.logs,
+    })
+    if (!res.ok) return { ok: false, error: res.error }
+    return {
+      ok: true,
+      config: null,
+      logs: null,
+      updatedAt: Date.now(),
+      session: { accountNumber: accountNumber.trim(), salt: creds.salt, passwordHash: creds.passwordHash },
+    }
+  } catch (e) {
+    console.error('create account failed', e)
+    return { ok: false, error: 'Reached for the backend at ' + CONVEX_URL + ' but the call failed. If this persists, the site build is outdated — redeploy or hard-refresh (Ctrl+Shift+R).' }
   }
 }
 
@@ -60,19 +68,24 @@ export async function loginToCloud(accountNumber: string, password: string): Pro
   const c = getClient()
   if (!c) return { ok: false, error: 'Cloud sync is not configured yet.' }
   const acct = accountNumber.trim()
-  // Salt lives server-side; fetch it by deriving with a placeholder first is not
-  // possible, so the login flow uses a two-step: ask for the salt, then verify.
-  const saltRes = await c.query(api.sync.getSalt, { accountNumber: acct })
-  if (!saltRes.ok) return { ok: false, error: saltRes.error }
-  const creds = await deriveCredentials(password, saltRes.salt)
-  const res = await c.query(api.sync.login, { accountNumber: acct, passwordHash: creds.passwordHash })
-  if (!res.ok) return { ok: false, error: res.error }
-  return {
-    ok: true,
-    config: res.config,
-    logs: res.logs,
-    updatedAt: res.updatedAt,
-    session: { accountNumber: acct, salt: creds.salt, passwordHash: creds.passwordHash },
+  try {
+    // Salt lives server-side; the login flow is two-step: ask for the salt,
+    // derive the hash locally, then let the server verify it.
+    const saltRes = await c.query(api.sync.getSalt, { accountNumber: acct })
+    if (!saltRes.ok) return { ok: false, error: saltRes.error }
+    const creds = await deriveCredentials(password, saltRes.salt)
+    const res = await c.query(api.sync.login, { accountNumber: acct, passwordHash: creds.passwordHash })
+    if (!res.ok) return { ok: false, error: res.error }
+    return {
+      ok: true,
+      config: res.config,
+      logs: res.logs,
+      updatedAt: res.updatedAt,
+      session: { accountNumber: acct, salt: creds.salt, passwordHash: creds.passwordHash },
+    }
+  } catch (e) {
+    console.error('login failed', e)
+    return { ok: false, error: 'Reached for the backend at ' + CONVEX_URL + ' but the call failed. If this persists, the site build is outdated — redeploy or hard-refresh (Ctrl+Shift+R).' }
   }
 }
 

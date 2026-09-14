@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createAccountOnCloud, cloudAvailable, loginToCloud, pushToCloud, type AccountSession } from './lib/cloud'
+import { createAccountOnCloud, cloudAvailable, loginToCloud, pushToCloud, SYNC_BACKEND_URL, type AccountSession } from './lib/cloud'
 import type { CatConfig, CategoryId, Config, DayLog, State } from './types'
 
 // ---------- date helpers ----------
@@ -628,6 +628,7 @@ function SyncPanel({
       )}
       {okMsg && <p className="sync-note ok">{okMsg}</p>}
       {errMsg && <p className="sync-note err">{errMsg}</p>}
+      <p className="sync-backend">backend: {SYNC_BACKEND_URL.replace(/^https:\/\//, '')}</p>
       <div className="sync-actions">
         {mode === 'choice' ? (
           <>

@@ -336,6 +336,13 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--go); outline-offset:2
 }
 .sync-note.ok{color:var(--go);}
  .sync-note.err{color:var(--alert);}
+.sync-backend{
+  font-family:var(--mono);
+  font-size:0.65rem;
+  color:var(--ink-dim);
+  margin:8px 0 0;
+  word-break:break-all;
+}
 
 .danger-zone{border-top:1px solid var(--line); padding-top:16px;}
 .btn-ghost{
