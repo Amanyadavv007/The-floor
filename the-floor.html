@@ -411,18 +411,30 @@ const HOW_IT_WORKS=[
 const STATE={ config:null, logs:null, currentTab:'today' };
 
 // ---------- storage ----------
+// Browser-backed persistence via localStorage: survives closing the browser/tab.
+var storage={
+  async get(key){
+    try{
+      var value=window.localStorage.getItem('thefloor:'+key);
+      return value===null? null:{ value:value };
+    }catch(e){ return null; }
+  },
+  async set(key,value){
+    window.localStorage.setItem('thefloor:'+key,value);
+  }
+};
 async function loadState(){
   let config=null, logs=null;
   try{
-    const res=await window.storage.get('config', false);
+    const res=await storage.get('config');
     config=res? JSON.parse(res.value): null;
   }catch(e){ config=null; }
   if(!config){
     config=defaultConfig();
-    try{ await window.storage.set('config', JSON.stringify(config), false); }catch(e){ console.error('save config failed',e); }
+    try{ await storage.set('config', JSON.stringify(config)); }catch(e){ console.error('save config failed',e); }
   }
   try{
-    const res=await window.storage.get('logs', false);
+    const res=await storage.get('logs');
     logs=res? JSON.parse(res.value): null;
   }catch(e){ logs=null; }
   if(!logs){ logs={}; }
@@ -430,11 +442,11 @@ async function loadState(){
   STATE.logs=logs;
 }
 async function persistLogs(){
-  try{ await window.storage.set('logs', JSON.stringify(STATE.logs), false); }
+  try{ await storage.set('logs', JSON.stringify(STATE.logs)); }
   catch(e){ console.error('save logs failed', e); }
 }
 async function persistConfig(){
-  try{ await window.storage.set('config', JSON.stringify(STATE.config), false); }
+  try{ await storage.set('config', JSON.stringify(STATE.config)); }
   catch(e){ console.error('save config failed', e); }
 }
 
@@ -684,6 +696,18 @@ function buildShell(){
   document.getElementById('savePlanBtn').addEventListener('click', onSavePlan);
   document.getElementById('resetBtn').addEventListener('click', onResetClick);
 }
+
+// Safety net: flush state right before the page closes or is hidden, so a
+// tick you just made is never lost even if the normal save didn't finish.
+window.addEventListener('beforeunload', function(){
+  if(STATE.config){ try{ storage.set('config', JSON.stringify(STATE.config)); }catch(e){} }
+  if(STATE.logs){ try{ storage.set('logs', JSON.stringify(STATE.logs)); }catch(e){} }
+});
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState==='hidden' && STATE.logs){
+    try{ storage.set('logs', JSON.stringify(STATE.logs)); }catch(e){}
+  }
+});
 
 (async function(){
   await loadState();
