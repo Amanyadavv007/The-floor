@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createAccountOnCloud, cloudAvailable, loginToCloud, pushToCloud, SYNC_BACKEND_URL, type AccountSession } from './lib/cloud'
+import { createAccountOnCloud, cloudAvailable, loginToCloud, pullFromCloud, pushToCloud, SYNC_BACKEND_URL, type AccountSession } from './lib/cloud'
 import type { CatConfig, CategoryId, Config, DayLog, State } from './types'
 
 // ---------- date helpers ----------
@@ -157,11 +157,87 @@ function clearSession(): void {
   } catch (e) {}
 }
 
-// Days are merged as a union: days only in the cloud copy appear, days only
-// locally stay, and if a day exists on both sides the local version wins.
+// Merge rule, per category field (day × category, and × item for multi):
+// a tick that exists on either side stays ticked — unchecking on one device
+// only counts if no other device still has it checked. Devices converge
+// instead of overwriting each other.
 function mergeLogs(local: Record<string, DayLog>, cloud: Record<string, DayLog>): Record<string, DayLog> {
   const merged: Record<string, DayLog> = { ...cloud }
-  for (const k of Object.keys(local)) merged[k] = local[k]
+  for (const day of Object.keys(local)) {
+    const l = local[day] || {}
+    const c = cloud[day] || {}
+    const dayLog: DayLog = { ...c }
+    const keys = new Set([...Object.keys(l), ...Object.keys(c)])
+    for (const key of keys) {
+      const lv = l[key]
+      const cv = c[key]
+      if (lv && typeof lv === 'object' && !Array.isArray(lv)) {
+        const lm = (lv as Record<string, boolean>) || {}
+        const cm = (cv && typeof cv === 'object' && !Array.isArray(cv) ? (cv as Record<string, boolean>) : {}) || {}
+        const m: Record<string, boolean> = { ...cm }
+        for (const k of Object.keys(lm)) m[k] = !!lm[k] || !!cm[k]
+        dayLog[key] = m
+      } else {
+        dayLog[key] = !!(lv as boolean) || !!(cv as boolean)
+      }
+    }
+    merged[day] = dayLog
+  }
+  return merged
+}
+
+// 3-way log merge: local vs. the last state this device confirmed with the
+// cloud (baseline) vs. the current cloud copy. For every field (day ×
+// category, and × item for multi):
+//   • both sides agree            → that value
+//   • only the cloud changed      → take the cloud value (a tick or an
+//                                    un-check made on another device lands)
+//   • only this device changed    → keep the local value (never clobber an
+//                                    edit this device hasn't pushed yet)
+//   • both changed                → keep the tick (a checked floor is the
+//                                    positive signal; losing one is worse)
+function isTickObj(v: unknown): v is Record<string, boolean> {
+  return !!v && typeof v === 'object' && !Array.isArray(v)
+}
+function mergeDayLogs(l: DayLog, b: DayLog | undefined, c: DayLog): DayLog {
+  const bl = b || {}
+  const out: DayLog = { ...c }
+  const keys = new Set([...Object.keys(l), ...Object.keys(c)])
+  for (const key of keys) {
+    const lv = l[key]
+    const bv = bl[key]
+    const cv = c[key]
+    if (isTickObj(lv) || isTickObj(bv) || isTickObj(cv)) {
+      const lo = isTickObj(lv) ? lv : {}
+      const bo = isTickObj(bv) ? bv : {}
+      const co = isTickObj(cv) ? cv : {}
+      const m: Record<string, boolean> = { ...co }
+      const ikeys = new Set([...Object.keys(lo), ...Object.keys(co)])
+      for (const ik of ikeys) {
+        const a = !!lo[ik]
+        const base = !!bo[ik]
+        const cloud = !!co[ik]
+        m[ik] = a === cloud ? a : cloud === base ? a : a === base ? cloud : a || cloud
+      }
+      out[key] = m
+    } else {
+      const a = !!lv
+      const base = !!bv
+      const cloud = !!cv
+      out[key] = a === cloud ? a : cloud === base ? a : a === base ? cloud : a || cloud
+    }
+  }
+  return out
+}
+function mergeLogsWithBaseline(
+  local: Record<string, DayLog>,
+  baseline: Record<string, DayLog>,
+  cloud: Record<string, DayLog>,
+): Record<string, DayLog> {
+  const merged: Record<string, DayLog> = { ...cloud }
+  for (const day of Object.keys(local)) {
+    merged[day] = mergeDayLogs(local[day] || {}, baseline[day], cloud[day] || {})
+  }
   return merged
 }
 
@@ -657,20 +733,35 @@ function SyncPanel({
 // ---------- app ----------
 export default function App() {
   const [state, setState] = useState<State | null>(null)
+  const [stateReady, setStateReady] = useState(false)
   const [currentTab, setCurrentTab] = useState<Tab>('today')
   const [account, setAccount] = useState<AccountSession | null>(null)
   const [cloudBusy, setCloudBusy] = useState<string | null>(null)
   const [cloudMsg, setCloudMsg] = useState<string | null>(null)
   const accountRef = useRef<AccountSession | null>(null)
+  const stateRef = useRef<State | null>(null)
+  // Cloud state version we've already incorporated, and the merged state as
+  // of the last confirmed sync (the 3-way merge baseline). No local-clock
+  // comparisons: server timestamps are only ever compared to each other, so
+  // a device with a skewed clock can't mistake a remote update for its own.
+  const lastCloudUpdatedAtRef = useRef<number>(0)
+  const lastSyncedRef = useRef<State | null>(null)
 
   useEffect(function () {
     accountRef.current = account
   }, [account])
 
+  useEffect(function () {
+    stateRef.current = state
+  }, [state])
+
   const syncStateToCloud = useCallback(function (s: State) {
     const acct = accountRef.current
     if (!acct) return
     void pushToCloud(acct, s).then(function (ok) {
+      // The cloud now mirrors s — it becomes the next merge baseline. On
+      // failure the baseline stays put so a later pull can't undo local edits.
+      if (ok) lastSyncedRef.current = s
       setCloudMsg(ok ? null : 'Sync is offline — changes are saved on this device and will sync later.')
     })
   }, [])
@@ -681,6 +772,7 @@ export default function App() {
       const loaded = await loadState()
       if (alive) setState(loaded)
       if (alive) setAccount(readSession())
+      if (alive) setStateReady(true)
     })()
     return function () {
       alive = false
@@ -697,6 +789,63 @@ export default function App() {
       clearTimeout(h)
     }
   }, [state, account, syncStateToCloud])
+
+  // Live sync: pull the account's cloud copy right away, every few seconds,
+  // and whenever the tab regains focus. A pull that is newer than anything
+  // this device has seen gets merged in — ticks (and un-ticks) made on another
+  // device appear here with no action needed.
+  useEffect(function () {
+    if (!account || !stateReady) return
+    let alive = true
+    async function pull() {
+      const acct = accountRef.current
+      if (!acct) return
+      const res = await pullFromCloud(acct)
+      if (!alive || !res.ok || !res.found) return
+      if (res.updatedAt <= lastCloudUpdatedAtRef.current) return
+      lastCloudUpdatedAtRef.current = res.updatedAt
+      const s = stateRef.current
+      if (!s) return
+      const cloudLogs = (res.logs as Record<string, DayLog>) || {}
+      const cloudConfig = res.config && (res.config as Config).categories ? (res.config as Config) : null
+      const base = lastSyncedRef.current
+      const logs = base ? mergeLogsWithBaseline(s.logs, base.logs, cloudLogs) : mergeLogs(s.logs, cloudLogs)
+      const remoteConfigChanged = cloudConfig
+        ? base
+          ? JSON.stringify(cloudConfig) !== JSON.stringify(base.config)
+          : true
+        : false
+      const config = remoteConfigChanged ? mergeConfig(s.config, cloudConfig as Config) : s.config
+      const logsChanged = JSON.stringify(logs) !== JSON.stringify(s.logs)
+      const configChanged = JSON.stringify(config) !== JSON.stringify(s.config)
+      if (logsChanged || configChanged) {
+        const merged: State = { config, logs }
+        setState(merged)
+        void persistConfig(config)
+        void persistLogs(logs)
+        void pushToCloud(acct, merged).then(function (ok) {
+          if (ok) lastSyncedRef.current = merged
+        })
+      } else {
+        lastSyncedRef.current = { config, logs }
+      }
+    }
+    void pull()
+    const iv = setInterval(function () {
+      void pull()
+    }, 8000)
+    function onVis() {
+      if (document.visibilityState === 'visible') void pull()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('focus', onVis)
+    return function () {
+      alive = false
+      clearInterval(iv)
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('focus', onVis)
+    }
+  }, [account, stateReady])
 
   // Safety net: flush state right before the page closes or is hidden, so a
   // tick you just made is never lost even if the normal save didn't finish.
@@ -717,7 +866,11 @@ export default function App() {
         try {
           storage.set('logs', JSON.stringify(state!.logs))
         } catch (e) {}
-        if (accountRef.current) void pushToCloud(accountRef.current, state!)
+        if (accountRef.current) {
+          void pushToCloud(accountRef.current, state!).then(function (ok) {
+            if (ok) lastSyncedRef.current = state!
+          })
+        }
       }
     }
     document.addEventListener('visibilitychange', onVis)
@@ -743,7 +896,11 @@ export default function App() {
       logs[today] = dayLog
       void persistLogs(logs)
       const acct = accountRef.current
-      if (acct) void pushToCloud(acct, { config: prev.config, logs: logs })
+      if (acct) {
+        void pushToCloud(acct, { config: prev.config, logs: logs }).then(function (ok) {
+          if (ok) lastSyncedRef.current = { config: prev.config, logs: logs }
+        })
+      }
       return { ...prev, logs: logs }
     })
   }, [])
@@ -784,6 +941,7 @@ export default function App() {
       }
       saveSession(res.session)
       setAccount(res.session)
+      setStateReady(true)
       setCloudMsg('ok: Sync account created for ' + phone + ' — use this phone number + PIN on any device to open your progress.')
     } catch (e) {
       setCloudMsg('Could not reach the sync service. Try again.')
@@ -815,7 +973,10 @@ export default function App() {
       const local = state ?? (await loadState())
       const mergedConfig = res.config && res.config.categories ? mergeConfig(local.config, res.config as Config) : local.config
       const merged: State = { config: mergedConfig, logs: mergeLogs(local.logs, (res.logs as Record<string, DayLog>) || {}) }
+      lastCloudUpdatedAtRef.current = 0
+      lastSyncedRef.current = merged
       setState(merged)
+      setStateReady(true)
       void persistConfig(merged.config)
       void persistLogs(merged.logs)
       void pushToCloud(res.session, merged)

@@ -94,6 +94,32 @@ export async function loginToCloud(accountNumber: string, password: string): Pro
   }
 }
 
+export interface PullResult {
+  ok: boolean
+  found: boolean
+  config: Config | null
+  logs: Record<string, DayLog> | null
+  updatedAt: number
+}
+
+// Authenticated read of the account's cloud state. Used by the live poll loop
+// so a device that is already signed in picks up changes made on other devices.
+export async function pullFromCloud(session: AccountSession): Promise<PullResult> {
+  const c = getClient()
+  if (!c) return { ok: false, found: false, config: null, logs: null, updatedAt: 0 }
+  try {
+    const res = await c.query(api.sync.login, {
+      accountNumber: session.accountNumber,
+      passwordHash: session.passwordHash,
+    })
+    if (!res.ok) return { ok: false, found: false, config: null, logs: null, updatedAt: 0 }
+    return { ok: true, found: true, config: res.config, logs: res.logs, updatedAt: res.updatedAt }
+  } catch (e) {
+    console.error('cloud pull failed', e)
+    return { ok: false, found: false, config: null, logs: null, updatedAt: 0 }
+  }
+}
+
 export async function pushToCloud(session: AccountSession, state: State): Promise<boolean> {
   const c = getClient()
   if (!c) return false
