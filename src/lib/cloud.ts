@@ -41,8 +41,11 @@ export async function createAccountOnCloud(
 ): Promise<AuthResult> {
   const c = getClient()
   if (!c) return { ok: false, error: 'Cloud sync is not configured yet.' }
-  const creds = await deriveCredentials(password)
   try {
+    if (!crypto?.subtle) {
+      return { ok: false, error: 'This browser blocked secure cryptography (the page must be opened over HTTPS). Reopen the site with https:// in the address bar.' }
+    }
+    const creds = await deriveCredentials(password)
     const res = await c.mutation(api.sync.createAccount, {
       accountNumber,
       passwordHash: creds.passwordHash,
@@ -59,8 +62,9 @@ export async function createAccountOnCloud(
       session: { accountNumber: accountNumber.trim(), salt: creds.salt, passwordHash: creds.passwordHash },
     }
   } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e)
     console.error('create account failed', e)
-    return { ok: false, error: 'Reached for the backend at ' + CONVEX_URL + ' but the call failed. If this persists, the site build is outdated — redeploy or hard-refresh (Ctrl+Shift+R).' }
+    return { ok: false, error: 'Sync call failed: ' + detail + ' (backend: ' + CONVEX_URL + ')' }
   }
 }
 
@@ -84,8 +88,9 @@ export async function loginToCloud(accountNumber: string, password: string): Pro
       session: { accountNumber: acct, salt: creds.salt, passwordHash: creds.passwordHash },
     }
   } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e)
     console.error('login failed', e)
-    return { ok: false, error: 'Reached for the backend at ' + CONVEX_URL + ' but the call failed. If this persists, the site build is outdated — redeploy or hard-refresh (Ctrl+Shift+R).' }
+    return { ok: false, error: 'Sync call failed: ' + detail + ' (backend: ' + CONVEX_URL + ')' }
   }
 }
 
