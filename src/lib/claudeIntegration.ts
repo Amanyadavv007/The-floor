@@ -19,7 +19,7 @@ function todayKey(): string {
   return fmtDate(new Date())
 }
 
-const CAT_ORDER: CategoryId[] = ['physical', 'study', 'diet', 'digital']
+const CAT_ORDER: CategoryId[] = ['physical', 'study', 'diet', 'english']
 
 function isCategoryFloorMet(log: any, catId: CategoryId, catConfig: any): boolean {
   if (!log) return false
@@ -69,7 +69,7 @@ export function generateClaudeDailyBriefing(state: State, targetDate?: string): 
     physical: { count: 0, rate: 0 },
     study: { count: 0, rate: 0 },
     diet: { count: 0, rate: 0 },
-    digital: { count: 0, rate: 0 },
+    english: { count: 0, rate: 0 },
   }
   for (const catId of CAT_ORDER) {
     let metCount = 0
@@ -98,7 +98,7 @@ export function generateClaudeDailyBriefing(state: State, targetDate?: string): 
   const categoryLines = CAT_ORDER.map((catId) => {
     const cat = config.categories[catId]
     const isMet = isCategoryFloorMet(log, catId, cat)
-    const icon = catId === 'physical' ? '🧹' : catId === 'study' ? '📚' : catId === 'diet' ? '🍳' : '📵'
+    const icon = catId === 'physical' ? '🧹' : catId === 'study' ? '📚' : catId === 'diet' ? '🍳' : '🗣'
     const status = isMet ? 'SECURED ✓' : 'PENDING ⏳'
     const box = isMet ? '[x]' : '[ ]'
 
@@ -172,7 +172,7 @@ Calm, direct, empathetic, stoic, and grounded. No toxic positivity or cheerleade
  * Generate a full Markdown Project Knowledge document for Claude Projects (claude.ai/projects).
  */
 export function generateClaudeProjectKnowledge(state: State): string {
-  const catOrder: CategoryId[] = ['physical', 'study', 'diet', 'digital']
+  const catOrder: CategoryId[] = ['physical', 'study', 'diet', 'english']
   const today = todayKey()
 
   let showUp30 = 0

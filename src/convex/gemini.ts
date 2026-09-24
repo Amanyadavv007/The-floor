@@ -33,7 +33,7 @@ CORE APP PRINCIPLES (The Floor):
   * Floor = non-negotiable bare minimum (e.g. 5 pushups, 2 minutes reading) when tired, sick, or busy.
   * Ideal = aspirational target when energy is high.
 - Recovery Protocol: When returning after 3+ missed days, the goal is just ONE floor to eliminate inertia.
-- The 4 Categories: Physical, Study, Diet, Digital.
+- The 4 Categories: Physical, Study, Diet, English speaking practice.
 
 CURRENT USER APP STATE (Background Reference):
 `;

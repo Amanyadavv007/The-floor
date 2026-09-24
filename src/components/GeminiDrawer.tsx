@@ -137,7 +137,7 @@ export function GeminiDrawer({ isOpen, onClose, state }: GeminiDrawerProps) {
   const today = todayKey()
   const todayLog = state.logs[today]
   let metToday = 0
-  for (const catId of ['physical', 'study', 'diet', 'digital'] as const) {
+  for (const catId of ['physical', 'study', 'diet', 'english'] as const) {
     const val = todayLog?.[catId]
     if (val && (typeof val !== 'object' || Object.values(val).some(Boolean))) {
       metToday++

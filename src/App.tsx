@@ -26,8 +26,8 @@ const STOIC_SPARKS = [
     author: 'Boundary Principle',
   },
   {
-    quote: 'Environment beats willpower every single time. Move the phone before sitting down.',
-    author: 'Friction Rule',
+    quote: 'Fluency is a muscle, not a talent. Two spoken minutes a day outlifts an hour of silent reading.',
+    author: 'Speak-Up Rule',
   },
   {
     quote: 'Streaks create fragility. Floors create resilience.',
@@ -43,7 +43,7 @@ const CAT_META: Record<CategoryId, { icon: string; kicker: string }> = {
   physical: { icon: '◫', kicker: 'Environment' },
   study: { icon: '⚡', kicker: 'Deep Work' },
   diet: { icon: '◆', kicker: 'Nutrition' },
-  digital: { icon: '⦾', kicker: 'Focus Shield' },
+  english: { icon: '🗣', kicker: 'Speak Up' },
 }
 
 function triggerAllFourConfetti(): void {
@@ -106,7 +106,7 @@ function displayDate(dateKey?: string): string {
 // ---------- types (shared with the cloud sync layer) ----------
 
 // ---------- default config ----------
-const CAT_ORDER: CategoryId[] = ['physical', 'study', 'diet', 'digital']
+const CAT_ORDER: CategoryId[] = ['physical', 'study', 'diet', 'english']
 function defaultConfig(): Config {
   return {
     startDate: todayKey(),
@@ -137,11 +137,11 @@ function defaultConfig(): Config {
         ifthen: "If I'm about to skip a PG meal or grab junk instead, I get one protein source in first, before anything else.",
         type: 'single',
       },
-      digital: {
-        label: 'Digital / reels control',
-        ideal: 'A full block with the phone out of reach entirely.',
-        floor: 'One environment action before you sit down to study — phone in another room, or blocker on.',
-        ifthen: 'If I sit down to study, my phone goes in another room or on airplane mode before I open my notes — not after.',
+      english: {
+        label: 'English speaking practice',
+        ideal: 'A full recorded conversation — 5 minutes on camera, replayed and reviewed for clarity and filler words.',
+        floor: 'Speak English out loud for 2 minutes — describe your day, a topic, or anything. Talk to yourself is fine.',
+        ifthen: "If I catch myself rehearsing sentences silently in my head, I say them OUT LOUD instead — fluency only builds through the mouth, not the mind.",
         type: 'single',
       },
     },
@@ -152,7 +152,7 @@ const HOW_IT_WORKS: string[] = [
   "Floors, not ideals — every category has a version you genuinely cannot fail. That's what gets logged as a win, not the full ideal.",
   'No streaks — progress is shown as X/30, a rolling window. One bad day doesn’t erase two good weeks.',
   'Recovery mode — after 3 days of zero floors, the ask drops even lower instead of piling on.',
-  'Environment over willpower — the digital floor is an action you take (move the phone), not a feeling you’re asked to resist.',
+  'Speak, don’t rehearse — the English floor is out loud by design. Silent practice in your head builds nothing; 2 spoken minutes counts as a win.',
   'If-then plans — decide your response to the hard moment now, below, before it’s midnight and you’re tired.',
   'Physical space is tracked on its own — a bad study day shouldn’t wreck your room too, and a messy room shouldn’t wreck your study day.',
 ]
@@ -336,13 +336,21 @@ function mergeLogsWithBaseline(
 }
 
 // Plan text: prefer whichever side has non-empty text for each field.
+// Only known categories are kept — stale cloud copies from before a category
+// rename (e.g. the old 'digital' plan) are dropped instead of merging back in
+// as a phantom fifth category that renders nowhere but corrupts merges.
 function mergeConfig(local: Config, cloud: Config): Config {
-  const categories: Record<CategoryId, CatConfig> = { ...local.categories }
-  for (const key of Object.keys(cloud.categories) as CategoryId[]) {
+  const categories: Record<CategoryId, CatConfig> = {} as Record<CategoryId, CatConfig>
+  for (const key of CAT_ORDER) {
     const l = local.categories[key]
     const c = cloud.categories[key]
+    if (!l && !c) continue
     if (!l) {
       categories[key] = c
+      continue
+    }
+    if (!c) {
+      categories[key] = l
       continue
     }
     categories[key] = {
@@ -359,7 +367,7 @@ function mergeConfig(local: Config, cloud: Config): Config {
 
 // ---------- logic ----------
 function emptyDayLog(): DayLog {
-  return { physical: { bed: false, clothes: false, hygiene: false }, study: false, diet: false, digital: false }
+  return { physical: { bed: false, clothes: false, hygiene: false }, study: false, diet: false, english: false }
 }
 function isFloorMet(dayLog: DayLog | undefined, catId: CategoryId, catDef: CatConfig): boolean {
   if (!dayLog) return false
@@ -527,7 +535,7 @@ function TodayTab({
     physical: false,
     study: false,
     diet: false,
-    digital: false,
+    english: false,
   })
 
   const isViewingToday = activeDate === today

@@ -12,7 +12,7 @@ export interface CatConfig {
   type: 'multi' | 'single'
   items?: CatItem[]
 }
-export type CategoryId = 'physical' | 'study' | 'diet' | 'digital'
+export type CategoryId = 'physical' | 'study' | 'diet' | 'english'
 export interface Config {
   startDate: string
   categories: Record<CategoryId, CatConfig>

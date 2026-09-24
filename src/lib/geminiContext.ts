@@ -1,6 +1,6 @@
 import type { State, CategoryId, DayLog, Config } from '../types'
 
-const CAT_ORDER: CategoryId[] = ['physical', 'study', 'diet', 'digital']
+const CAT_ORDER: CategoryId[] = ['physical', 'study', 'diet', 'english']
 
 function pad(n: number): string {
   return n < 10 ? '0' + n : String(n)
@@ -48,7 +48,7 @@ export function generateGeminiContext(state: State): string {
     physical: 0,
     study: 0,
     diet: 0,
-    digital: 0,
+    english: 0,
   }
 
   for (let i = 29; i >= 0; i--) {
