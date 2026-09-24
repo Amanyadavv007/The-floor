@@ -157,6 +157,22 @@ const HOW_IT_WORKS: string[] = [
   'Physical space is tracked on its own — a bad study day shouldn’t wreck your room too, and a messy room shouldn’t wreck your study day.',
 ]
 
+// Migration: the 'digital' (reels) category was replaced by 'english'. Existing
+// installs — localStorage and older cloud copies — still carry the old key, so
+// normalize to exactly the four known categories, filling the new one's plan
+// from the defaults. Idempotent; old digital tick history in logs is left as-is.
+function migrateConfig(raw: Config): Config {
+  const def = defaultConfig()
+  const src = raw.categories as Record<string, CatConfig>
+  const categories: Record<CategoryId, CatConfig> = {
+    physical: src.physical || def.categories.physical,
+    study: src.study || def.categories.study,
+    diet: src.diet || def.categories.diet,
+    english: src.english || def.categories.english,
+  }
+  return { ...raw, categories }
+}
+
 // ---------- storage (localStorage-backed; survives closing the browser) ----------
 const storage = {
   async get(key: string): Promise<{ value: string } | null> {
@@ -182,6 +198,13 @@ async function loadState(): Promise<State> {
   }
   if (!config) {
     config = defaultConfig()
+    try {
+      await storage.set('config', JSON.stringify(config))
+    } catch (e) {
+      console.error('save config failed', e)
+    }
+  } else if (!config.categories.english) {
+    config = migrateConfig(config)
     try {
       await storage.set('config', JSON.stringify(config))
     } catch (e) {
