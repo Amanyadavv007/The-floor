@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as gemini from "../gemini.js";
 import type * as sync from "../sync.js";
 
 import type {
@@ -17,6 +18,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  gemini: typeof gemini;
   sync: typeof sync;
 }>;
 

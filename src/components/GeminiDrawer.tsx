@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import type { State } from '../types'
 import { generateGeminiContext, todayKey } from '../lib/geminiContext'
+import { askGemini } from '../lib/cloud'
 
 export interface ChatMessage {
   id: string
@@ -92,33 +93,11 @@ export function GeminiDrawer({ isOpen, onClose, state }: GeminiDrawerProps) {
     try {
       const liveContext = generateGeminiContext(state)
 
-      // Send chat history and current live context
-      const response = await fetch('/api/gemini/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: updatedMessages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          context: liveContext,
-        }),
-      })
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}))
-        let msg = errData.error || `Server responded with status ${response.status}`
-        if (typeof msg === 'string' && msg.trim().startsWith('{')) {
-          try {
-            const parsed = JSON.parse(msg)
-            if (parsed?.error?.message) msg = parsed.error.message
-            else if (parsed?.message) msg = parsed.message
-          } catch (_) {}
-        }
-        throw new Error(msg)
-      }
-
-      const data = await response.json()
+      // Ask Gemini through the Convex backend (holds the API key server-side)
+      const data = await askGemini(
+        updatedMessages.map((m) => ({ role: m.role, content: m.content })),
+        liveContext,
+      )
       const botMsg: ChatMessage = {
         id: String(Date.now() + 1),
         role: 'assistant',

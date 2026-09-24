@@ -136,3 +136,34 @@ export async function pushToCloud(session: AccountSession, state: State): Promis
     return false
   }
 }
+
+// ---------------------------------------------------------------------------
+// Gemini AI coach
+// ---------------------------------------------------------------------------
+
+/**
+ * Send the chat thread (plus live app context) to Gemini through the Convex
+ * backend, which holds the GEMINI_API_KEY server-side. Replaces AI Studio's
+ * /api/gemini/chat Express endpoint, which cannot run on Freebuff's static
+ * hosting.
+ */
+export async function askGemini(
+  messages: { role: string; content: string }[],
+  context: string,
+): Promise<{ reply: string }> {
+  const c = getClient()
+  if (!c) throw new Error('Gemini is not configured yet (no backend URL).')
+  try {
+    return await c.action(api.gemini.chat, { messages, context })
+  } catch (err: any) {
+    let msg: string = err?.message || err?.toString() || 'Failed to reach Gemini. Please try again.'
+    if (typeof msg === 'string' && msg.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(msg)
+        if (parsed?.error?.message) msg = parsed.error.message
+        else if (parsed?.message) msg = parsed.message
+      } catch (_) {}
+    }
+    throw new Error(msg)
+  }
+}
