@@ -4,16 +4,19 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port ${PORT:-3000} --strictPort",
+    "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "lint": "tsc -b --noEmit"
   },
   "dependencies": {
+    "canvas-confetti": "^1.9.4",
     "convex": "^1.45.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/canvas-confetti": "^1.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",

@@ -1,6 +1,79 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import confetti from 'canvas-confetti'
 import { createAccountOnCloud, cloudAvailable, loginToCloud, pullFromCloud, pushToCloud, SYNC_BACKEND_URL, type AccountSession } from './lib/cloud'
 import type { CatConfig, CategoryId, Config, DayLog, State } from './types'
+
+const ALL_FOUR_CELEBRATED_KEY = 'thefloor:all_four_celebrated'
+
+const STOIC_SPARKS = [
+  {
+    quote: 'A low floor means you cannot fail. Win the floor today, build the ceiling tomorrow.',
+    author: 'Baseline Principle',
+  },
+  {
+    quote: 'Action creates motivation, not the other way around. Two minutes counts.',
+    author: 'Momentum Rule',
+  },
+  {
+    quote: 'Never drop to zero. A rolling 30-day window turns consistency into identity.',
+    author: 'The Floor Philosophy',
+  },
+  {
+    quote: 'Physical space protects mental space. A messy room shouldn’t wreck your study day.',
+    author: 'Boundary Principle',
+  },
+  {
+    quote: 'Environment beats willpower every single time. Move the phone before sitting down.',
+    author: 'Friction Rule',
+  },
+  {
+    quote: 'Streaks create fragility. Floors create resilience.',
+    author: 'Recovery Mindset',
+  },
+  {
+    quote: 'Consistency is not about perfection. It is about never abandoning your baseline.',
+    author: 'Discipline Code',
+  },
+]
+
+const CAT_META: Record<CategoryId, { icon: string; kicker: string }> = {
+  physical: { icon: '◫', kicker: 'Environment' },
+  study: { icon: '⚡', kicker: 'Deep Work' },
+  diet: { icon: '◆', kicker: 'Nutrition' },
+  digital: { icon: '⦾', kicker: 'Focus Shield' },
+}
+
+function triggerAllFourConfetti(): void {
+  try {
+    // Primary celebration burst with theme colors (sage green #6FA8A6, warm gold #E2A550, cream #EDEAE2)
+    confetti({
+      particleCount: 85,
+      spread: 70,
+      origin: { y: 0.6 },
+      colors: ['#6FA8A6', '#E2A550', '#EDEAE2', '#529490', '#F3C978'],
+    })
+
+    // Side cannons for full celebration effect
+    setTimeout(function () {
+      confetti({
+        particleCount: 45,
+        angle: 60,
+        spread: 55,
+        origin: { x: 0, y: 0.65 },
+        colors: ['#6FA8A6', '#E2A550', '#EDEAE2'],
+      })
+      confetti({
+        particleCount: 45,
+        angle: 120,
+        spread: 55,
+        origin: { x: 1, y: 0.65 },
+        colors: ['#6FA8A6', '#E2A550', '#EDEAE2'],
+      })
+    }, 180)
+  } catch (e) {
+    console.error('confetti failed', e)
+  }
+}
 
 // ---------- date helpers ----------
 function fmtDate(d: Date): string {
@@ -15,11 +88,16 @@ function addDays(dateStr: string, delta: number): string {
   dt.setDate(dt.getDate() + delta)
   return fmtDate(dt)
 }
+function parseDateKey(dateStr: string): Date {
+  const parts = dateStr.split('-').map(Number)
+  return new Date(parts[0], parts[1] - 1, parts[2])
+}
 function todayKey(): string {
   return fmtDate(new Date())
 }
-function displayDate(): string {
-  return new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+function displayDate(dateKey?: string): string {
+  const d = dateKey ? parseDateKey(dateKey) : new Date()
+  return d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
 // ---------- types (shared with the cloud sync layer) ----------
@@ -115,6 +193,19 @@ async function loadState(): Promise<State> {
   }
   if (!logs) {
     logs = {}
+  }
+  if (config && logs) {
+    const datesWithActivity = Object.keys(logs).filter((d) => {
+      const dl = logs ? logs[d] : undefined
+      return dl && config && countCompleted(dl, config) > 0
+    })
+    if (datesWithActivity.length > 0) {
+      datesWithActivity.sort()
+      if (!config.startDate || datesWithActivity[0] < config.startDate) {
+        config.startDate = datesWithActivity[0]
+        void storage.set('config', JSON.stringify(config))
+      }
+    }
   }
   return { config, logs }
 }
@@ -283,9 +374,22 @@ function countCompleted(dayLog: DayLog | undefined, config: Config): number {
   }
   return n
 }
+function getEffectiveStartDate(state: State): string {
+  let earliest = state.config.startDate || todayKey()
+  for (const dateStr of Object.keys(state.logs)) {
+    if (countCompleted(state.logs[dateStr], state.config) > 0) {
+      if (dateStr < earliest) {
+        earliest = dateStr
+      }
+    }
+  }
+  return earliest
+}
+
 function computeMode(state: State): 'normal' | 'recovery' {
   const today = todayKey()
-  const daysSinceStart = Math.round((new Date(today).getTime() - new Date(state.config.startDate).getTime()) / 86400000)
+  const effectiveStart = getEffectiveStartDate(state)
+  const daysSinceStart = Math.round((new Date(today).getTime() - new Date(effectiveStart).getTime()) / 86400000)
   if (daysSinceStart < 3) return 'normal'
   let missed = 0
   for (let i = 1; i <= 3; i++) {
@@ -307,16 +411,39 @@ function overallShowUpCount(state: State): number {
 }
 
 // ---------- components ----------
-function Header({ showUpCount }: { showUpCount: number }) {
+function Header({
+  showUpCount,
+  account,
+  onToggleSync,
+}: {
+  showUpCount: number
+  account: AccountSession | null
+  onToggleSync: () => void
+}) {
   return (
     <header className="header">
       <div className="header-top">
-        <span className="wordmark">The Floor</span>
-        <span className="today-date">{displayDate()}</span>
-      </div>
-      <div className="identity">
-        <span className="identity-num">{showUpCount}</span>
-        <span className="identity-label">/30 days you showed up</span>
+        <div className="wordmark-group">
+          <div className="wordmark-row">
+            <span className="wordmark">The Floor</span>
+            <span className="brand-dot" aria-hidden="true" />
+          </div>
+          <span className="wordmark-sub">
+            <b className="tabular-nums">{showUpCount}/30</b> days active · Never zero
+          </span>
+        </div>
+        <div className="header-actions">
+          <button
+            type="button"
+            className={`sync-badge-btn ${account ? 'synced' : 'local'}`}
+            onClick={onToggleSync}
+            title={account ? `Logged in: ${account.accountNumber}. Tap to manage sync.` : 'Tap to set up cloud sync across devices'}
+            aria-label={account ? 'Cloud sync active' : 'Local storage only'}
+          >
+            <span className="sync-badge-dot" />
+            <span className="sync-badge-text">{account ? 'Cloud' : 'Local'}</span>
+          </button>
+        </div>
       </div>
     </header>
   )
@@ -325,26 +452,28 @@ function Header({ showUpCount }: { showUpCount: number }) {
 type Tab = 'today' | 'progress' | 'plan'
 
 function Tabs({ currentTab, onSelect }: { currentTab: Tab; onSelect: (t: Tab) => void }) {
-  const tabs: Array<{ id: Tab; label: string }> = [
-    { id: 'today', label: 'Today' },
-    { id: 'progress', label: 'Progress' },
-    { id: 'plan', label: 'Plan' },
+  const tabs: Array<{ id: Tab; label: string; icon: string }> = [
+    { id: 'today', label: 'Today', icon: '◎' },
+    { id: 'progress', label: 'Progress', icon: '◫' },
+    { id: 'plan', label: 'Plan & If-Then', icon: '⚙' },
   ]
   return (
-    <nav className="tabs" role="tablist">
+    <nav className="tabs" role="tablist" aria-label="Main Navigation">
       {tabs.map(function (t) {
+        const isSelected = currentTab === t.id
         return (
           <button
             key={t.id}
-            className="tab-btn"
+            className={`tab-btn ${isSelected ? 'active' : ''}`}
             data-tab={t.id}
             role="tab"
-            aria-selected={currentTab === t.id}
+            aria-selected={isSelected}
             onClick={function () {
               onSelect(t.id)
             }}
           >
-            {t.label}
+            <span className="tab-btn-icon" aria-hidden="true">{t.icon}</span>
+            <span className="tab-btn-label">{t.label}</span>
           </button>
         )
       })}
@@ -352,92 +481,483 @@ function Tabs({ currentTab, onSelect }: { currentTab: Tab; onSelect: (t: Tab) =>
   )
 }
 
-function TodayTab({ state, onToggle }: { state: State; onToggle: (catId: CategoryId, itemId?: string) => void }) {
+function TodayTab({
+  state,
+  onToggle,
+}: {
+  state: State
+  onToggle: (catId: CategoryId, itemId?: string, targetDate?: string) => void
+}) {
   const today = todayKey()
-  const dayLog = state.logs[today] || emptyDayLog()
+  const [activeDate, setActiveDate] = useState<string>(today)
+  const [quoteIdx, setQuoteIdx] = useState<number>(() => Math.floor(Math.random() * STOIC_SPARKS.length))
+  const [expandedIfThen, setExpandedIfThen] = useState<Record<CategoryId, boolean>>({
+    physical: false,
+    study: false,
+    diet: false,
+    digital: false,
+  })
 
+  const isViewingToday = activeDate === today
+  const activeDayLog = state.logs[activeDate] || emptyDayLog()
+  const completedCount = countCompleted(activeDayLog, state.config)
   const mode = computeMode(state)
+  const showUpCount = overallShowUpCount(state)
+  const consistencyRate = Math.round((showUpCount / 30) * 100)
+
+  // Past 7 days rolling window (6 days back up to today)
+  const pastWeekDays: Array<{
+    dateStr: string
+    dayNum: number
+    dayName: string
+    isToday: boolean
+    isSelected: boolean
+    count: number
+  }> = []
+
+  for (let i = 6; i >= 0; i--) {
+    const d = addDays(today, -i)
+    const dt = parseDateKey(d)
+    const log = state.logs[d]
+    const c = log ? countCompleted(log, state.config) : 0
+    pastWeekDays.push({
+      dateStr: d,
+      dayNum: dt.getDate(),
+      dayName: dt.toLocaleDateString('en-US', { weekday: 'short' }),
+      isToday: d === today,
+      isSelected: d === activeDate,
+      count: c,
+    })
+  }
+
+  const totalDaysWithFloors = Object.keys(state.logs).filter(
+    (d) => countCompleted(state.logs[d], state.config) > 0
+  ).length
+
   let banner: JSX.Element | null = null
   if (mode === 'recovery') {
     banner = (
       <div className="mode-banner">
-        <h3>You’ve gone quiet for 3 days.</h3>
+        <div className="mode-banner-badge">Recovery Protocol Active</div>
+        <h3>You’ve been away for 3 days.</h3>
         <p>
-          That’s the exact pattern — a couple good weeks, then months of nothing. Don’t try to fix all four today.
-          Pick ONE category below and just hit the floor. That’s the whole job right now.
+          Don’t attempt all four today. The system asks for just <b>ONE floor</b> to reset the pattern and break inertia. That’s your entire job today.
         </p>
       </div>
     )
-  } else {
-    const daysSinceStart = Math.round((new Date(today).getTime() - new Date(state.config.startDate).getTime()) / 86400000)
-    if (daysSinceStart < 1) {
-      banner = (
-        <div className="welcome-banner">
-          <h3>Day one.</h3>
-          <p>Just hit the floors below. Nothing else matters today.</p>
-        </div>
-      )
-    }
+  } else if (totalDaysWithFloors === 0 && showUpCount === 0) {
+    banner = (
+      <div className="welcome-banner">
+        <div className="welcome-banner-badge">Day 1 of 30</div>
+        <h3>Baseline initialized.</h3>
+        <p>Hit any floors below today. Perfection is never required; showing up is everything.</p>
+      </div>
+    )
   }
 
   return (
     <main id="tabToday" className="tab-panel">
       {banner}
+
+      {/* Hero Momentum Card */}
+      <div className="today-hero-card">
+        <div className="hero-top-row">
+          <div className="hero-kicker-group">
+            <span className="hero-kicker-date">
+              {isViewingToday ? 'Today · ' + displayDate(today) : `Log for ${displayDate(activeDate)}`}
+            </span>
+            <span className="hero-pill-status">
+              {completedCount === 4 ? 'All Floors Secured' : `${completedCount}/4 Completed`}
+            </span>
+          </div>
+          <div className="hero-completion-pct">
+            {Math.round((completedCount / 4) * 100)}%
+          </div>
+        </div>
+
+        <h2 className="hero-headline">
+          {completedCount === 4
+            ? 'Daily baseline secured. The floor holds.'
+            : completedCount === 3
+            ? '3 floors locked in. Just one remaining.'
+            : completedCount === 2
+            ? 'Halfway through your daily foundation.'
+            : completedCount === 1
+            ? 'Baseline activated. Momentum is moving.'
+            : 'One floor is all it takes to start.'}
+        </h2>
+
+        {/* 4-segment visual floor bar */}
+        <div className="hero-segments-bar" aria-label={`${completedCount} of 4 floors completed`}>
+          {[0, 1, 2, 3].map((idx) => {
+            const isFilled = idx < completedCount
+            return (
+              <div
+                key={idx}
+                className={`hero-segment ${isFilled ? 'filled' : ''}`}
+                title={`Floor ${idx + 1}: ${isFilled ? 'Secured' : 'Pending'}`}
+              />
+            )
+          })}
+        </div>
+
+        <div className="hero-footer-metrics">
+          <div className="hero-metric">
+            <span className="hero-metric-label">30-Day Rolling Momentum</span>
+            <span className="hero-metric-val">
+              <b className="tabular-nums">{showUpCount}</b>
+              <span className="dim">/30 days</span>
+            </span>
+          </div>
+          <div className="hero-metric-sep" />
+          <div className="hero-metric">
+            <span className="hero-metric-label">Rolling Consistency</span>
+            <span className="hero-metric-val">
+              <b className="tabular-nums">{consistencyRate}%</b>
+            </span>
+          </div>
+          <div className="hero-metric-sep" />
+          <div className="hero-metric">
+            <span className="hero-metric-label">Floor System</span>
+            <span className={`hero-status-pill ${mode === 'recovery' ? 'recovery' : 'active'}`}>
+              {mode === 'recovery' ? 'Recovery' : 'Resilient'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 7-Day Rolling Scroller */}
+      <div className="week-strip-wrapper">
+        <div className="week-strip-header">
+          <span className="week-strip-title">Recent 7 Days</span>
+          {!isViewingToday && (
+            <button
+              type="button"
+              className="jump-today-link"
+              onClick={() => setActiveDate(today)}
+            >
+              Return to Today →
+            </button>
+          )}
+        </div>
+
+        <div className="week-strip" role="group" aria-label="7-Day History Strip">
+          {pastWeekDays.map((d) => {
+            return (
+              <button
+                key={d.dateStr}
+                type="button"
+                className={`week-day-cell ${d.isSelected ? 'selected' : ''} ${d.isToday ? 'is-today' : ''} ${
+                  d.count > 0 ? 'has-floors' : ''
+                }`}
+                onClick={() => setActiveDate(d.dateStr)}
+                title={`${d.dayName} ${d.dateStr}: ${d.count}/4 floors met`}
+              >
+                <span className="week-day-name">{d.dayName}</span>
+                <span className="week-day-num tabular-nums">{d.dayNum}</span>
+                <div className="week-day-indicator" aria-hidden="true">
+                  <span className={`dot-bar level-${d.count}`} />
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Today Cards */}
       <div id="todayCards">
         {CAT_ORDER.map(function (catId) {
           const cat = state.config.categories[catId]
+          const meta = CAT_META[catId]
+          const isCatFloorMet = isFloorMet(activeDayLog, catId, cat)
+          const isExpanded = !!expandedIfThen[catId]
+          const isMulti = cat.type === 'multi'
+
           let body: JSX.Element
-          if (cat.type === 'multi') {
+          if (isMulti) {
+            const items = cat.items || []
+            const multiLog = (activeDayLog[catId] as Record<string, boolean> | undefined) || {}
+            const metItemsCount = items.filter((it) => multiLog[it.id]).length
+
             body = (
-              <>
-                {(cat.items || []).map(function (item) {
-                  const multiLog = (dayLog[catId] as Record<string, boolean> | undefined) || {}
-                  const checked = multiLog[item.id] ? true : false
+              <div className="multi-check-grid">
+                <div className="multi-check-meta">
+                  <span className="multi-check-count">
+                    {metItemsCount}/{items.length} completed
+                  </span>
+                  {isCatFloorMet && <span className="floor-done-tag">Floor Met</span>}
+                </div>
+                {items.map(function (item) {
+                  const checked = !!multiLog[item.id]
                   return (
-                    <div className="check-row" key={item.id}>
+                    <label
+                      className={`check-row ${checked ? 'checked' : ''}`}
+                      key={item.id}
+                      htmlFor={'chk-' + catId + '-' + item.id}
+                    >
                       <input
                         type="checkbox"
                         id={'chk-' + catId + '-' + item.id}
                         checked={checked}
                         onChange={function () {
-                          onToggle(catId, item.id)
+                          onToggle(catId, item.id, activeDate)
                         }}
                       />
-                      <label htmlFor={'chk-' + catId + '-' + item.id}>{item.label}</label>
-                    </div>
+                      <span className="check-box-visual" aria-hidden="true" />
+                      <span className="check-label">{item.label}</span>
+                    </label>
                   )
                 })}
-              </>
+              </div>
             )
           } else {
-            const checked = dayLog[catId] ? true : false
+            const checked = !!activeDayLog[catId]
             body = (
-              <div className="check-row">
+              <label
+                className={`check-row primary-check-action ${checked ? 'checked' : ''}`}
+                htmlFor={'chk-' + catId}
+              >
                 <input
                   type="checkbox"
                   id={'chk-' + catId}
                   checked={checked}
                   onChange={function () {
-                    onToggle(catId)
+                    onToggle(catId, undefined, activeDate)
                   }}
                 />
-                <label htmlFor={'chk-' + catId}>Floor met today</label>
-              </div>
+                <span className="check-box-visual" aria-hidden="true" />
+                <span className="check-label">
+                  {checked ? 'Floor locked in for today' : 'Mark floor as completed'}
+                </span>
+                {checked && <span className="floor-tag-done">✓ Done</span>}
+              </label>
             )
           }
+
           return (
-            <div className="cat-card" key={catId}>
-              <p className="cat-label">{cat.label}</p>
-              <p className="cat-ideal">ideal: {cat.ideal}</p>
-              <p className="cat-floor">
-                <b>Floor:</b> {cat.floor}
-              </p>
-              {body}
+            <div
+              className={`cat-card ${isCatFloorMet ? 'floor-met' : ''}`}
+              key={catId}
+            >
+              <div className="cat-card-top">
+                <div className="cat-card-badge-row">
+                  <span className="cat-icon-chip" aria-hidden="true">
+                    {meta.icon}
+                  </span>
+                  <span className="cat-kicker">{meta.kicker}</span>
+                  {isCatFloorMet && (
+                    <span className="cat-met-pill">Floor Secured ✓</span>
+                  )}
+                </div>
+                <h3 className="cat-label">{cat.label}</h3>
+              </div>
+
+              {/* Highlighted Floor block */}
+              <div className="cat-floor-highlight">
+                <div className="cat-floor-header">
+                  <span className="cat-floor-tag">The Floor</span>
+                  <span className="cat-floor-sub">Your non-negotiable win</span>
+                </div>
+                <p className="cat-floor-body">{cat.floor}</p>
+              </div>
+
+              {/* Muted Ideal ceiling */}
+              <div className="cat-ideal-row">
+                <span className="cat-ideal-prefix">Ideal:</span>
+                <span className="cat-ideal-text">{cat.ideal}</span>
+              </div>
+
+              {/* Interactive checkboxes */}
+              <div className="cat-actions-zone">{body}</div>
+
+              {/* If-Then Rescue Protocol */}
+              {cat.ifthen && (
+                <div className="cat-ifthen-drawer">
+                  <button
+                    type="button"
+                    className="cat-ifthen-trigger"
+                    onClick={() =>
+                      setExpandedIfThen((prev) => ({
+                        ...prev,
+                        [catId]: !prev[catId],
+                      }))
+                    }
+                    aria-expanded={isExpanded}
+                  >
+                    <span className="cat-ifthen-label">
+                      {isExpanded ? 'Hide If-Then protocol' : 'If tempted / friction hits'}
+                    </span>
+                    <span className="cat-ifthen-arrow" aria-hidden="true">
+                      {isExpanded ? '▲' : '▼'}
+                    </span>
+                  </button>
+                  {isExpanded && (
+                    <div className="cat-ifthen-body">
+                      <p>{cat.ifthen}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )
         })}
       </div>
+
+      {/* Stoic Grounding Wisdom */}
+      <div className="daily-spark-card">
+        <div className="spark-header">
+          <span className="spark-kicker">Daily Grounding Principle</span>
+          <button
+            type="button"
+            className="spark-refresh-btn"
+            onClick={() => setQuoteIdx((prev) => (prev + 1) % STOIC_SPARKS.length)}
+            title="Cycle next insight"
+          >
+            Next Principle ↻
+          </button>
+        </div>
+        <blockquote className="spark-body">
+          “{STOIC_SPARKS[quoteIdx].quote}”
+        </blockquote>
+        <div className="spark-author">— {STOIC_SPARKS[quoteIdx].author}</div>
+      </div>
     </main>
+  )
+}
+
+function HeatmapCalendar({ state }: { state: State }) {
+  const today = todayKey()
+  const [selectedDay, setSelectedDay] = useState<string | null>(today)
+
+  const days: {
+    dateStr: string
+    dayNum: number
+    weekday: string
+    isToday: boolean
+    floorsMet: number
+    metCategories: string[]
+  }[] = []
+
+  for (let i = 29; i >= 0; i--) {
+    const d = addDays(today, -i)
+    const dt = parseDateKey(d)
+    const dl = state.logs[d]
+    const metCategories: string[] = []
+    for (const catId of CAT_ORDER) {
+      if (isFloorMet(dl, catId, state.config.categories[catId])) {
+        metCategories.push(state.config.categories[catId].label)
+      }
+    }
+    days.push({
+      dateStr: d,
+      dayNum: dt.getDate(),
+      weekday: dt.toLocaleDateString('en-IN', { weekday: 'short' }),
+      isToday: d === today,
+      floorsMet: metCategories.length,
+      metCategories,
+    })
+  }
+
+  const firstDt = parseDateKey(days[0].dateStr)
+  // 0 = Sun, 1 = Mon ... 6 = Sat -> Mon start: 0 for Mon, 6 for Sun
+  const leadingOffset = (firstDt.getDay() + 6) % 7
+  const totalDaysMet = days.filter((d) => d.floorsMet > 0).length
+
+  const activeDayData = (selectedDay && days.find((d) => d.dateStr === selectedDay)) || days[days.length - 1]
+
+  const weekHeaders = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+  return (
+    <div className="heatmap-card">
+      <div className="heatmap-head">
+        <h3 className="heatmap-title">30–Day Activity Heatmap</h3>
+        <p className="heatmap-sub">Days you showed up with at least 1 floor</p>
+        <div className="heatmap-stats">
+          <span className="heatmap-stat-num">{totalDaysMet}</span>
+          <span className="heatmap-stat-den">/30 days</span>
+        </div>
+      </div>
+
+      <div className="heatmap-weekdays" aria-hidden="true">
+        {weekHeaders.map((w) => (
+          <span key={w} className="heatmap-weekday">
+            {w}
+          </span>
+        ))}
+      </div>
+
+      <div className="heatmap-grid" role="grid" aria-label="30-day floor activity calendar">
+        {Array.from({ length: leadingOffset }).map((_, idx) => (
+          <span key={'empty-' + idx} className="heatmap-cell empty" aria-hidden="true" />
+        ))}
+        {days.map((day) => {
+          const isSelected = selectedDay === day.dateStr
+          const level = day.floorsMet
+          const tooltip = `${day.weekday}, ${day.dateStr}${day.isToday ? ' (Today)' : ''}: ${
+            day.floorsMet === 0
+              ? '0 floors met'
+              : `${day.floorsMet}/4 floors met (${day.metCategories.join(', ')})`
+          }`
+
+          return (
+            <button
+              key={day.dateStr}
+              type="button"
+              className={`heatmap-cell level-${level}${day.isToday ? ' today' : ''}${
+                isSelected ? ' selected' : ''
+              }`}
+              title={tooltip}
+              aria-label={tooltip}
+              aria-pressed={isSelected}
+              onClick={() => setSelectedDay(day.dateStr)}
+            >
+              <span className="heatmap-day-num">{day.dayNum}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {activeDayData && (
+        <div className="heatmap-selected-info">
+          <div className="heatmap-selected-date">
+            <span className="heatmap-selected-dayname">{activeDayData.weekday}, </span>
+            <span className="heatmap-selected-datestr">{activeDayData.dateStr}</span>
+            {activeDayData.isToday && <span className="heatmap-today-badge">Today</span>}
+          </div>
+          <div className="heatmap-selected-result">
+            {activeDayData.floorsMet > 0 ? (
+              <span className="text-met">
+                <b>{activeDayData.floorsMet}/4 floors met</b>
+                <span className="heatmap-cat-list"> — {activeDayData.metCategories.join(', ')}</span>
+              </span>
+            ) : (
+              <span className="text-missed">0 floors met (No activity)</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="heatmap-footer">
+        <span className="heatmap-legend-label">Floors met:</span>
+        <div className="heatmap-legend" aria-label="Heatmap legend">
+          <span className="heatmap-legend-item">
+            <span className="heatmap-legend-swatch level-0" /> 0
+          </span>
+          <span className="heatmap-legend-item">
+            <span className="heatmap-legend-swatch level-1" /> 1
+          </span>
+          <span className="heatmap-legend-item">
+            <span className="heatmap-legend-swatch level-2" /> 2
+          </span>
+          <span className="heatmap-legend-item">
+            <span className="heatmap-legend-swatch level-3" /> 3
+          </span>
+          <span className="heatmap-legend-item">
+            <span className="heatmap-legend-swatch level-4" /> 4
+          </span>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -445,23 +965,55 @@ function ProgressTab({ state }: { state: State }) {
   const today = todayKey()
   return (
     <main id="tabProgress" className="tab-panel">
+      <HeatmapCalendar state={state} />
+
+      <div className="category-progress-title">
+        <span>Category Rolling Windows</span>
+      </div>
+
       <div id="progressGrids">
         {CAT_ORDER.map(function (catId) {
           const cat = state.config.categories[catId]
-          let doneCount = 0
-          const cells: JSX.Element[] = []
+          // Collect dates in the 30-day rolling window where this floor was met
+          const completedDates: string[] = []
           for (let i = 29; i >= 0; i--) {
             const d = addDays(today, -i)
             const dl = state.logs[d]
-            const met = isFloorMet(dl, catId, cat)
-            if (met) doneCount++
-            cells.push(<span className={'cell' + (met ? ' done' : '')} title={d} key={i}></span>)
+            if (isFloorMet(dl, catId, cat)) {
+              completedDates.push(d)
+            }
           }
+          const doneCount = completedDates.length
+          const cells: JSX.Element[] = []
+          for (let i = 0; i < 30; i++) {
+            const isDone = i < doneCount
+            const title = isDone
+              ? `${completedDates[i]} — Floor met`
+              : `Day ${i + 1} of 30`
+            cells.push(
+              <span
+                className={'cell' + (isDone ? ' done' : '')}
+                title={title}
+                key={i}
+              ></span>
+            )
+          }
+          const pct = Math.round((doneCount / 30) * 100)
+          const meta = CAT_META[catId]
           return (
             <div className="progress-block" key={catId}>
               <div className="progress-head">
-                <span className="progress-title">{cat.label}</span>
-                <span className="progress-count">{doneCount}/30</span>
+                <div className="progress-head-left">
+                  <span className="progress-icon" aria-hidden="true">{meta.icon}</span>
+                  <span className="progress-title">{cat.label}</span>
+                </div>
+                <div className="progress-head-right">
+                  <span className="progress-count tabular-nums">{doneCount}/30</span>
+                  <span className="progress-pct tabular-nums">{pct}%</span>
+                </div>
+              </div>
+              <div className="progress-bar-track">
+                <div className="progress-bar-fill" style={{ width: `${pct}%` }} />
               </div>
               <div className="grid-cells">{cells}</div>
             </div>
@@ -597,6 +1149,9 @@ function DangerZone() {
 async function doReset(): Promise<void> {
   const config = defaultConfig()
   const logs: Record<string, DayLog> = {}
+  try {
+    window.localStorage.removeItem(ALL_FOUR_CELEBRATED_KEY)
+  } catch (e) {}
   await persistConfig(config)
   await persistLogs(logs)
   const session = readSession()
@@ -880,12 +1435,15 @@ export default function App() {
     }
   }, [state])
 
-  const handleToggle = useCallback(function (catId: CategoryId, itemId?: string) {
+  const [syncModalOpen, setSyncModalOpen] = useState(false)
+
+  const handleToggle = useCallback(function (catId: CategoryId, itemId?: string, targetDate?: string) {
     setState(function (prev) {
       if (!prev) return prev
-      const today = todayKey()
+      const date = targetDate || todayKey()
       const logs = { ...prev.logs }
-      const dayLog: DayLog = logs[today] ? { ...logs[today] } : emptyDayLog()
+      const dayLog: DayLog = logs[date] ? { ...logs[date] } : emptyDayLog()
+      const prevCompleted = countCompleted(dayLog, prev.config)
       if (itemId) {
         const multiLog = { ...((dayLog[catId] as Record<string, boolean>) || {}) }
         multiLog[itemId] = !multiLog[itemId]
@@ -893,7 +1451,21 @@ export default function App() {
       } else {
         dayLog[catId] = !dayLog[catId]
       }
-      logs[today] = dayLog
+      logs[date] = dayLog
+      const newCompleted = countCompleted(dayLog, prev.config)
+
+      if (date === todayKey() && prevCompleted < 4 && newCompleted === 4) {
+        try {
+          const already = window.localStorage.getItem(ALL_FOUR_CELEBRATED_KEY)
+          if (!already) {
+            window.localStorage.setItem(ALL_FOUR_CELEBRATED_KEY, 'true')
+            triggerAllFourConfetti()
+          }
+        } catch (e) {
+          triggerAllFourConfetti()
+        }
+      }
+
       void persistLogs(logs)
       const acct = accountRef.current
       if (acct) {
@@ -1005,20 +1577,66 @@ export default function App() {
   const showUpCount = overallShowUpCount(state)
   return (
     <div className="app" id="app">
-      <Header showUpCount={showUpCount} />
-      <Tabs currentTab={currentTab} onSelect={setCurrentTab} />
-      <SyncPanel
-        key={account ? account.accountNumber : 'anon'}
+      <Header
+        showUpCount={showUpCount}
         account={account}
-        busy={cloudBusy}
-        message={cloudMsg}
-        onCreate={handleCreateAccount}
-        onLogin={handleLogin}
-        onSignOut={handleSignOut}
+        onToggleSync={() => setSyncModalOpen((v) => !v)}
       />
+      <Tabs currentTab={currentTab} onSelect={setCurrentTab} />
+
+      {/* Sync Modal / Drawer */}
+      {syncModalOpen && (
+        <div className="sync-modal-backdrop" onClick={() => setSyncModalOpen(false)}>
+          <div className="sync-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="sync-modal-head">
+              <div className="sync-modal-title-group">
+                <span className="sync-modal-title">Cloud Sync & Devices</span>
+                <span className="sync-modal-sub">Keep your rolling 30-day baseline synced across phone and computer</span>
+              </div>
+              <button
+                type="button"
+                className="sync-modal-close"
+                onClick={() => setSyncModalOpen(false)}
+                aria-label="Close sync modal"
+              >
+                ✕
+              </button>
+            </div>
+            <SyncPanel
+              key={account ? account.accountNumber : 'anon'}
+              account={account}
+              busy={cloudBusy}
+              message={cloudMsg}
+              onCreate={handleCreateAccount}
+              onLogin={handleLogin}
+              onSignOut={handleSignOut}
+            />
+          </div>
+        </div>
+      )}
+
       {currentTab === 'today' && <TodayTab state={state} onToggle={handleToggle} />}
       {currentTab === 'progress' && <ProgressTab state={state} />}
-      {currentTab === 'plan' && <PlanTab state={state} onSave={handlePlanChange} onPersist={handlePersistConfig} />}
+      {currentTab === 'plan' && (
+        <div className="plan-tab-wrapper">
+          <PlanTab state={state} onSave={handlePlanChange} onPersist={handlePersistConfig} />
+          <div className="plan-sync-section">
+            <div className="plan-sync-header">
+              <h3 className="plan-section-title">Cloud Account & Sync</h3>
+              <p className="plan-section-desc">Access your floors on other devices or create a secure backup.</p>
+            </div>
+            <SyncPanel
+              key={account ? account.accountNumber : 'anon'}
+              account={account}
+              busy={cloudBusy}
+              message={cloudMsg}
+              onCreate={handleCreateAccount}
+              onLogin={handleLogin}
+              onSignOut={handleSignOut}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
