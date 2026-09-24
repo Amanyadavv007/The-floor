@@ -7,8 +7,17 @@ import { action } from "./_generated/server";
 // The GEMINI_API_KEY is read from the Convex deployment env and never reaches the browser.
 
 const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
-// Try modern Flash models in order; fall back if a model id is unavailable on the key.
-const MODEL_CANDIDATES = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
+// Try modern Flash models in order. gemini-3.5-flash is verified working with
+// current keys; older ids (gemini-2.5-flash, gemini-2.0-flash) are retired for
+// new keys, and 3.x siblings sometimes 503 under demand, hence the fallbacks.
+const MODEL_CANDIDATES = [
+  "gemini-3.5-flash",
+  "gemini-flash-latest",
+  "gemini-3.1-flash-lite",
+  "gemini-3.8-flash",
+];
+const MAX_ATTEMPTS_PER_MODEL = 2;
+const RETRY_DELAY_MS = 600;
 
 const SYSTEM_INSTRUCTION = `You are Gemini, a live, intelligent, and natural conversational coach embedded inside "The Floor" habit tracking app.
 
@@ -86,11 +95,16 @@ export const chat = action({
 
     let lastErr: unknown = null;
     for (const model of MODEL_CANDIDATES) {
-      try {
-        const reply = await callGemini(apiKey, model, systemInstruction, contents);
-        if (reply) return { reply };
-      } catch (err) {
-        lastErr = err;
+      for (let attempt = 0; attempt < MAX_ATTEMPTS_PER_MODEL; attempt++) {
+        try {
+          const reply = await callGemini(apiKey, model, systemInstruction, contents);
+          if (reply) return { reply };
+          lastErr = new Error(`Gemini ${model} returned an empty response`);
+        } catch (err) {
+          lastErr = err;
+        }
+        // Brief pause before retrying the same model (helps with 503 demand spikes).
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
       }
     }
 
