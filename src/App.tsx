@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import confetti from 'canvas-confetti'
 import { createAccountOnCloud, cloudAvailable, loginToCloud, pullFromCloud, pushToCloud, SYNC_BACKEND_URL, type AccountSession } from './lib/cloud'
 import type { CatConfig, CategoryId, Config, DayLog, State } from './types'
+import { DailyCoachCard, WeeklyReflectionCard, AdjustFloorButton } from './components/Coach'
+import type { CoachSummary } from './lib/coach'
 
 const ALL_FOUR_CELEBRATED_KEY = 'thefloor:all_four_celebrated'
 
@@ -410,6 +412,31 @@ function overallShowUpCount(state: State): number {
   return n
 }
 
+// Build the compact, data-grounded snapshot the AI coach reasons over. No raw
+// logs leave the device — only aggregate counts and the user's own plan text.
+function buildCoachSummary(state: State): CoachSummary {
+  const today = todayKey()
+  const categories = CAT_ORDER.map(function (catId) {
+    const cat = state.config.categories[catId]
+    let count30 = 0
+    for (let i = 0; i < 30; i++) {
+      const d = addDays(today, -i)
+      if (isFloorMet(state.logs[d], catId, cat)) count30++
+    }
+    return { id: catId, label: cat.label, floor: cat.floor, ifthen: cat.ifthen, count30 }
+  })
+  const daysTracked = Object.keys(state.logs).filter(
+    (d) => countCompleted(state.logs[d], state.config) > 0,
+  ).length
+  return {
+    mode: computeMode(state),
+    showUpCount: overallShowUpCount(state),
+    todayCount: countCompleted(state.logs[today], state.config),
+    daysTracked,
+    categories,
+  }
+}
+
 // ---------- components ----------
 function Header({
   showUpCount,
@@ -484,9 +511,11 @@ function Tabs({ currentTab, onSelect }: { currentTab: Tab; onSelect: (t: Tab) =>
 function TodayTab({
   state,
   onToggle,
+  onApplyFloor,
 }: {
   state: State
   onToggle: (catId: CategoryId, itemId?: string, targetDate?: string) => void
+  onApplyFloor: (catId: string, floor: string, ifthen: string) => void
 }) {
   const today = todayKey()
   const [activeDate, setActiveDate] = useState<string>(today)
@@ -555,9 +584,13 @@ function TodayTab({
     )
   }
 
+  const coachSummary = buildCoachSummary(state)
+
   return (
     <main id="tabToday" className="tab-panel">
       {banner}
+
+      <DailyCoachCard summary={coachSummary} />
 
       {/* Hero Momentum Card */}
       <div className="today-hero-card">
@@ -798,6 +831,12 @@ function TodayTab({
                   )}
                 </div>
               )}
+
+              <AdjustFloorButton
+                summary={coachSummary}
+                categoryId={catId}
+                onApply={onApplyFloor}
+              />
             </div>
           )
         })}
@@ -963,8 +1002,11 @@ function HeatmapCalendar({ state }: { state: State }) {
 
 function ProgressTab({ state }: { state: State }) {
   const today = todayKey()
+  const coachSummary = buildCoachSummary(state)
   return (
     <main id="tabProgress" className="tab-panel">
+      <WeeklyReflectionCard summary={coachSummary} />
+
       <HeatmapCalendar state={state} />
 
       <div className="category-progress-title">
@@ -1492,6 +1534,28 @@ export default function App() {
     syncStateToCloud(state)
   }, [state, syncStateToCloud])
 
+  // Apply an AI-suggested easier floor: update the category's floor (and
+  // if-then), persist locally, and push to the cloud so it follows the user.
+  const handleApplyFloor = useCallback(function (catId: string, floor: string, ifthen: string) {
+    setState(function (prev) {
+      if (!prev) return prev
+      const id = catId as CategoryId
+      const existing = prev.config.categories[id]
+      if (!existing) return prev
+      const categories = { ...prev.config.categories }
+      categories[id] = { ...existing, floor, ifthen: ifthen || existing.ifthen }
+      const config = { ...prev.config, categories }
+      void persistConfig(config)
+      const acct = accountRef.current
+      if (acct) {
+        void pushToCloud(acct, { config, logs: prev.logs }).then(function (ok) {
+          if (ok) lastSyncedRef.current = { config, logs: prev.logs }
+        })
+      }
+      return { ...prev, config }
+    })
+  }, [])
+
   const handleCreateAccount = useCallback(async function (acct: string, pw: string) {
     if (!state) return
     const phone = acct.replace(/[\s()\-]/g, '')
@@ -1615,7 +1679,7 @@ export default function App() {
         </div>
       )}
 
-      {currentTab === 'today' && <TodayTab state={state} onToggle={handleToggle} />}
+      {currentTab === 'today' && <TodayTab state={state} onToggle={handleToggle} onApplyFloor={handleApplyFloor} />}
       {currentTab === 'progress' && <ProgressTab state={state} />}
       {currentTab === 'plan' && (
         <div className="plan-tab-wrapper">
