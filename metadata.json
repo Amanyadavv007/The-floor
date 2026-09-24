@@ -3,5 +3,8 @@
   "description": "A rolling-window habit and baseline tracker built around daily floor commitments, recovery mode, and low-friction wins.",
   "capabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

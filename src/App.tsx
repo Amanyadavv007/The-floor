@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import confetti from 'canvas-confetti'
 import { createAccountOnCloud, cloudAvailable, loginToCloud, pullFromCloud, pushToCloud, SYNC_BACKEND_URL, type AccountSession } from './lib/cloud'
 import type { CatConfig, CategoryId, Config, DayLog, State } from './types'
+import { ClaudeModal } from './components/ClaudeModal'
+import { GeminiDrawer } from './components/GeminiDrawer'
+import { generateClaudeDailyBriefing, copyToClipboard } from './lib/claudeIntegration'
 
 const ALL_FOUR_CELEBRATED_KEY = 'thefloor:all_four_celebrated'
 
@@ -414,11 +417,15 @@ function overallShowUpCount(state: State): number {
 function Header({
   showUpCount,
   account,
-  onToggleSync,
+  onToggleSettings,
+  onToggleGemini,
+  geminiOpen,
 }: {
   showUpCount: number
   account: AccountSession | null
-  onToggleSync: () => void
+  onToggleSettings: () => void
+  onToggleGemini: () => void
+  geminiOpen: boolean
 }) {
   return (
     <header className="header">
@@ -435,13 +442,38 @@ function Header({
         <div className="header-actions">
           <button
             type="button"
-            className={`sync-badge-btn ${account ? 'synced' : 'local'}`}
-            onClick={onToggleSync}
-            title={account ? `Logged in: ${account.accountNumber}. Tap to manage sync.` : 'Tap to set up cloud sync across devices'}
-            aria-label={account ? 'Cloud sync active' : 'Local storage only'}
+            className={`gemini-toggle-btn ${geminiOpen ? 'active' : ''}`}
+            onClick={onToggleGemini}
+            title="Ask Gemini Coach — Context-Aware Assistant"
+            aria-label="Toggle Gemini Chatbot"
           >
-            <span className="sync-badge-dot" />
-            <span className="sync-badge-text">{account ? 'Cloud' : 'Local'}</span>
+            <span className="gemini-toggle-sparkle" aria-hidden="true">✦</span>
+            <span className="gemini-toggle-text">Gemini</span>
+          </button>
+          <button
+            type="button"
+            className={`settings-toggle-btn ${account ? 'has-account' : ''}`}
+            onClick={onToggleSettings}
+            title={account ? `Account: ${account.accountNumber} · Settings & Sync` : 'Settings & Account Info'}
+            aria-label="Settings and Account"
+          >
+            <svg
+              className="settings-gear-icon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            <span className="settings-toggle-text">Settings</span>
+            {account && <span className="settings-account-dot" aria-hidden="true" />}
           </button>
         </div>
       </div>
@@ -961,8 +993,25 @@ function HeatmapCalendar({ state }: { state: State }) {
   )
 }
 
-function ProgressTab({ state }: { state: State }) {
+function ProgressTab({
+  state,
+  onOpenClaude,
+}: {
+  state: State
+  onOpenClaude: (tab?: 'briefing' | 'prompt' | 'project') => void
+}) {
   const today = todayKey()
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    const text = generateClaudeDailyBriefing(state, today)
+    const ok = await copyToClipboard(text)
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2400)
+    }
+  }
+
   return (
     <main id="tabProgress" className="tab-panel">
       <HeatmapCalendar state={state} />
@@ -1020,6 +1069,36 @@ function ProgressTab({ state }: { state: State }) {
           )
         })}
       </div>
+
+      {/* Claude AI Briefing section at the end of the Progress section */}
+      <div className="progress-claude-section">
+        <div className="progress-claude-head">
+          <div className="progress-claude-badge">
+            <span className="progress-claude-dot" aria-hidden="true" />
+            <span>Claude AI Companion</span>
+          </div>
+          <h3 className="progress-claude-title">Export Progress to Claude</h3>
+          <p className="progress-claude-sub">
+            Generate a clean, structured summary of your rolling 30-day baseline and today's floor checklist to paste directly into your Claude chatbot.
+          </p>
+        </div>
+        <div className="progress-claude-actions">
+          <button
+            type="button"
+            className={`btn-primary progress-claude-copy ${copied ? 'copied' : ''}`}
+            onClick={handleCopy}
+          >
+            {copied ? '✓ Copied to Clipboard!' : 'Copy Briefing for Claude'}
+          </button>
+          <button
+            type="button"
+            className="btn-ghost progress-claude-hub"
+            onClick={() => onOpenClaude('briefing')}
+          >
+            Claude Hub & Prompts ↗
+          </button>
+        </div>
+      </div>
     </main>
   )
 }
@@ -1028,10 +1107,12 @@ function PlanTab({
   state,
   onSave,
   onPersist,
+  onOpenClaude,
 }: {
   state: State
   onSave: (catId: CategoryId, field: 'ideal' | 'floor' | 'ifthen', value: string) => void
   onPersist: () => void
+  onOpenClaude?: (tab?: 'briefing' | 'prompt' | 'project') => void
 }) {
   const [saved, setSaved] = useState(false)
   useEffect(function () {
@@ -1107,6 +1188,39 @@ function PlanTab({
       <button id="savePlanBtn" className="btn-primary" onClick={handleSaveClick}>
         {saved ? 'Saved' : 'Save plan'}
       </button>
+
+      {onOpenClaude && (
+        <div className="plan-claude-section">
+          <div className="plan-claude-header">
+            <div className="plan-claude-badge">
+              <span className="plan-claude-dot" aria-hidden="true" />
+              <span>Claude Companion</span>
+            </div>
+            <h3 className="plan-section-title">Claude AI Integration</h3>
+            <p className="plan-section-desc">
+              Connect your daily baseline with Claude to receive personalized, anti-guilt coaching in your Claude chats.
+            </p>
+          </div>
+          <div className="plan-claude-card">
+            <div className="plan-claude-row">
+              <div>
+                <div className="plan-claude-card-title">Claude Hub & Prompt Setup</div>
+                <div className="plan-claude-card-sub">
+                  Copy today's live briefing, download Claude Project knowledge, or get the custom System Prompt.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="plan-claude-btn"
+                onClick={() => onOpenClaude('briefing')}
+              >
+                Open Claude Hub ↗
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <DangerZone />
     </main>
   )
@@ -1436,6 +1550,14 @@ export default function App() {
   }, [state])
 
   const [syncModalOpen, setSyncModalOpen] = useState(false)
+  const [claudeModalOpen, setClaudeModalOpen] = useState(false)
+  const [claudeModalTab, setClaudeModalTab] = useState<'briefing' | 'prompt' | 'project'>('briefing')
+  const [geminiOpen, setGeminiOpen] = useState(false)
+
+  const handleOpenClaude = useCallback(function (tab: 'briefing' | 'prompt' | 'project' = 'briefing') {
+    setClaudeModalTab(tab)
+    setClaudeModalOpen(true)
+  }, [])
 
   const handleToggle = useCallback(function (catId: CategoryId, itemId?: string, targetDate?: string) {
     setState(function (prev) {
@@ -1580,18 +1702,40 @@ export default function App() {
       <Header
         showUpCount={showUpCount}
         account={account}
-        onToggleSync={() => setSyncModalOpen((v) => !v)}
+        onToggleSettings={() => setSyncModalOpen((v) => !v)}
+        onToggleGemini={() => setGeminiOpen((v) => !v)}
+        geminiOpen={geminiOpen}
       />
       <Tabs currentTab={currentTab} onSelect={setCurrentTab} />
 
-      {/* Sync Modal / Drawer */}
+      {/* Gemini Context-Aware Assistant Drawer */}
+      <GeminiDrawer
+        isOpen={geminiOpen}
+        onClose={() => setGeminiOpen(false)}
+        state={state}
+      />
+
+      {/* Claude AI Briefing Modal */}
+      {claudeModalOpen && (
+        <ClaudeModal
+          state={state}
+          initialTab={claudeModalTab}
+          onClose={() => setClaudeModalOpen(false)}
+        />
+      )}
+
+      {/* Settings / Account Modal */}
       {syncModalOpen && (
         <div className="sync-modal-backdrop" onClick={() => setSyncModalOpen(false)}>
           <div className="sync-modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="sync-modal-head">
               <div className="sync-modal-title-group">
-                <span className="sync-modal-title">Cloud Sync & Devices</span>
-                <span className="sync-modal-sub">Keep your rolling 30-day baseline synced across phone and computer</span>
+                <span className="sync-modal-title">Settings & Account</span>
+                <span className="sync-modal-sub">
+                  {account
+                    ? `Account #${account.accountNumber} · Synced across devices`
+                    : 'Manage cloud backup, cross-device sync, and account details'}
+                </span>
               </div>
               <button
                 type="button"
@@ -1616,10 +1760,15 @@ export default function App() {
       )}
 
       {currentTab === 'today' && <TodayTab state={state} onToggle={handleToggle} />}
-      {currentTab === 'progress' && <ProgressTab state={state} />}
+      {currentTab === 'progress' && <ProgressTab state={state} onOpenClaude={handleOpenClaude} />}
       {currentTab === 'plan' && (
         <div className="plan-tab-wrapper">
-          <PlanTab state={state} onSave={handlePlanChange} onPersist={handlePersistConfig} />
+          <PlanTab
+            state={state}
+            onSave={handlePlanChange}
+            onPersist={handlePersistConfig}
+            onOpenClaude={handleOpenClaude}
+          />
           <div className="plan-sync-section">
             <div className="plan-sync-header">
               <h3 className="plan-section-title">Cloud Account & Sync</h3>
